@@ -1,0 +1,197 @@
+# Vite Web Extension 项目 Cursor Rules
+
+## 项目概述
+这是一个基于 Vite 构建的浏览器扩展项目，支持 Chrome 和 Firefox，使用 React 19、TypeScript 和 Tailwind CSS。
+
+## 技术栈
+- **构建工具**: Vite 6.3.5
+- **前端框架**: React 19.1.0
+- **类型系统**: TypeScript 5.8.3 (严格模式)
+- **样式**: Tailwind CSS 4.1.8
+- **扩展构建**: @crxjs/vite-plugin 2.0.3
+- **浏览器 API**: webextension-polyfill 0.12.0
+- **包管理器**: pnpm (推荐) 或 yarn
+
+## 项目结构
+
+### 目录组织
+```
+src/
+├── assets/          # 静态资源（图片、样式等）
+│   ├── img/
+│   └── styles/
+├── locales/         # 国际化资源
+├── pages/           # 扩展的各个页面
+│   ├── background/  # 后台脚本 (service worker)
+│   ├── content/     # 内容脚本
+│   ├── popup/       # 弹出窗口
+│   ├── options/     # 选项页面
+│   ├── newtab/      # 新标签页覆盖
+│   ├── devtools/    # 开发者工具页面
+│   └── panel/       # 开发者工具面板
+```
+
+### 路径别名
+使用 TypeScript 路径别名，避免相对路径：
+- `@src/*` → `src/*`
+- `@assets/*` → `src/assets/*`
+- `@locales/*` → `src/locales/*`
+- `@pages/*` → `src/pages/*`
+
+**示例**:
+```typescript
+import Popup from '@pages/popup/Popup';
+import '@assets/styles/tailwind.css';
+```
+
+## 编码规范
+
+### TypeScript
+- **严格模式**: 始终启用 TypeScript 严格模式检查
+- **类型定义**: 所有函数、组件必须提供类型注解
+- **避免 any**: 除非绝对必要，否则不使用 `any`，优先使用 `unknown`
+- **接口优先**: 使用 `interface` 而非 `type` 定义对象类型（React 组件 props 除外）
+
+### React
+- **函数组件**: 使用函数组件和 Hooks，不使用类组件
+- **组件命名**: 使用 PascalCase，文件名与组件名保持一致
+- **Props 类型**: 使用 `interface` 定义组件 Props
+- **默认导出**: React 组件使用默认导出
+- **Hooks 规则**: 遵循 React Hooks 规则，自定义 Hook 以 `use` 开头
+
+**组件示例**:
+```typescript
+interface PopupProps {
+  title: string;
+  onClose?: () => void;
+}
+
+export default function Popup({ title, onClose }: PopupProps) {
+  // ...
+}
+```
+
+### Web Extension 特定规则
+
+#### Manifest V3
+- 使用 Manifest V3 规范
+- Service Worker (background) 使用 ES 模块，不支持 DOM API
+- Content Script 可以使用 React 和 DOM API
+- 权限最小化原则，只在 manifest.json 中声明必要的权限
+
+#### 页面类型
+1. **Background Script** (`src/pages/background/index.ts`)
+   - 不能使用 DOM API
+   - 用于消息传递、存储管理、网络请求等
+   - 使用 `webextension-polyfill` 访问浏览器 API
+
+2. **Content Script** (`src/pages/content/index.tsx`)
+   - 可以访问和修改页面 DOM
+   - 使用 React 渲染 UI 到页面
+   - 通过 `chrome.runtime.sendMessage` 与 background 通信
+
+3. **Popup/Options/Newtab** (`src/pages/popup/index.tsx` 等)
+   - 完整的 React 应用
+   - 可以使用所有浏览器 API
+   - 每个页面有独立的 HTML 入口文件
+
+#### 消息传递
+```typescript
+// Content Script 发送消息
+chrome.runtime.sendMessage({ type: 'ACTION', data: payload });
+
+// Background 接收消息
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // 处理消息
+});
+```
+
+### 样式规范
+
+#### Tailwind CSS
+- 优先使用 Tailwind 工具类
+- 自定义样式放在 `src/assets/styles/` 目录
+- Content Script 样式需要在 `manifest.json` 的 `content_scripts.css` 中声明
+- 避免使用内联样式（除非动态样式）
+
+#### 样式文件组织
+- 全局样式: `src/assets/styles/tailwind.css`
+- 页面特定样式: `src/pages/{page}/index.css` 或 `{Page}.css`
+- Content Script 样式: `public/contentStyle.css`
+
+### 文件命名
+- **组件文件**: PascalCase (如 `Popup.tsx`, `Options.tsx`)
+- **工具函数**: camelCase (如 `utils.ts`, `api.ts`)
+- **类型定义**: camelCase (如 `types.ts`, `global.d.ts`)
+- **配置文件**: kebab-case (如 `vite.config.base.ts`)
+
+## 开发规范
+
+### 构建配置
+- Chrome: `pnpm build:chrome` 或 `pnpm dev:chrome`
+- Firefox: `pnpm build:firefox` 或 `pnpm dev:firefox`
+- 开发模式使用 nodemon 自动重启
+
+### 导入顺序
+1. React 相关导入
+2. 第三方库导入
+3. 样式导入
+4. 本地模块导入（按路径别名分组）
+
+**示例**:
+```typescript
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+
+import '@pages/popup/index.css';
+import '@assets/styles/tailwind.css';
+
+import Popup from '@pages/popup/Popup';
+```
+
+### 错误处理
+- 使用 try-catch 处理异步操作
+- 在关键位置添加错误边界
+- 提供有意义的错误消息
+
+### 代码质量
+- 保持函数简短和单一职责
+- 提取重复逻辑为工具函数或自定义 Hooks
+- 使用 ESLint 和 Prettier 保持代码一致性
+- 提交前确保没有 TypeScript 和 ESLint 错误
+
+## 浏览器兼容性
+- 支持 Chrome (Manifest V3)
+- 支持 Firefox (通过 @crxjs/vite-plugin 自动适配)
+- 使用 `webextension-polyfill` 确保跨浏览器兼容性
+
+## 注意事项
+
+### Content Script
+- Content Script 中的 React 组件需要挂载到页面 DOM
+- 确保选择器唯一，避免与页面元素冲突
+- 使用 Shadow DOM 如果需要在隔离环境中运行
+
+### Background Script
+- 避免长时间运行的任务
+- 使用 `chrome.storage` 而非 `localStorage`
+- Service Worker 会被浏览器自动休眠，需要持久化状态
+
+### 安全性
+- 不在代码中硬编码敏感信息
+- 对外部输入进行验证和清理
+- 使用 HTTPS 进行网络请求（开发环境除外）
+
+## 开发工作流
+1. 修改代码后，nodemon 会自动重新构建
+2. 在浏览器中手动重新加载扩展以查看更改
+3. 使用 Chrome DevTools 或 Firefox DevTools 调试
+4. 提交前运行构建确保没有错误
+
+## 新增功能指南
+- 新增页面：在 `src/pages/` 下创建目录，包含 `index.html`、`index.tsx` 和样式文件
+- 新增组件：放在对应页面的目录下或创建共享组件目录
+- 新增工具函数：创建 `src/utils/` 目录
+- 新增类型定义：在 `src/global.d.ts` 或创建独立的类型文件
+
+

@@ -1,19 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "name in manifest.json",
-  "description": "description in manifest.json",
-  "options_ui": {
-    "page": "src/pages/options/index.html"
-  },
+  "name": "AdLib Pro - FB Ad Library Downloader",
+  "description": "Download FB Ad Library ads picture and video resources. Support multiple languages.",
+
   "action": {
     "default_popup": "src/pages/popup/index.html",
     "default_icon": {
       "32": "icon-32.png"
     }
   },
-  "chrome_url_overrides": {
-    "newtab": "src/pages/newtab/index.html"
-  },
+
   "icons": {
     "128": "icon-128.png"
   },
@@ -23,9 +19,7 @@
   "content_scripts": [
     {
       "matches": [
-        "http://*/*",
-        "https://*/*",
-        "<all_urls>"
+        "https://www.facebook.com/ads/library*"
       ],
       "js": [
         "src/pages/content/index.tsx"
