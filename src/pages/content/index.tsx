@@ -156,28 +156,167 @@ function injectStyles(): void {
   logInfo("injectStyles: 已注入样式");
 }
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+/** 从广告卡片上下文提取所有图片/视频 URL */
+function extractMediaUrls(context: HTMLElement): { images: string[]; videos: string[] } {
+  const images: string[] = [];
+  const videos: string[] = [];
+
+  // 视频：<video src> 或 <source src>
+  context.querySelectorAll<HTMLVideoElement>("video").forEach((v) => {
+    if (v.src && !v.src.startsWith("blob:")) videos.push(v.src);
+    v.querySelectorAll<HTMLSourceElement>("source").forEach((s) => {
+      if (s.src && !s.src.startsWith("blob:")) videos.push(s.src);
+    });
+  });
+
+  // 图片：<img src>（过滤掉 1×1 追踪像素和 svg）
+  context.querySelectorAll<HTMLImageElement>("img").forEach((img) => {
+    const src = img.src;
+    if (!src || src.startsWith("data:") || src.endsWith(".svg")) return;
+    if (img.naturalWidth <= 1 || img.naturalHeight <= 1) return;
+    images.push(src);
+  });
+
+  // 背景图：style="background-image: url(...)"
+  context.querySelectorAll<HTMLElement>("[style]").forEach((el) => {
+    const m = el.style.backgroundImage.match(/url\(["']?([^"')]+)["']?\)/);
+    if (m?.[1] && !m[1].startsWith("data:")) images.push(m[1]);
+  });
+
+  return {
+    images: [...new Set(images)],
+    videos: [...new Set(videos)],
+  };
+}
+
+/** 从广告卡片找到"See ad details"链接或最近的 <a> 指向广告详情页 */
+function findAdDetailUrl(context: HTMLElement): string | null {
+  // 优先找文字为 "See ad details" / "See summary details" 的链接
+  const anchors = Array.from(context.querySelectorAll<HTMLAnchorElement>("a[href]"));
+  for (const a of anchors) {
+    const text = normalizeVisibleText(a.textContent ?? "");
+    if (AD_TEXT_PHRASES.includes(text as (typeof AD_TEXT_PHRASES)[number])) {
+      return a.href;
+    }
+  }
+  // 回退：找 /ads/library?id= 或 /ads/archive/ 链接
+  for (const a of anchors) {
+    if (a.href.includes("/ads/library") || a.href.includes("/ads/archive")) {
+      return a.href;
+    }
+  }
+  return null;
+}
+
+/** 收集页面上所有可见广告卡片的详情链接 */
+function collectAllAdUrls(): string[] {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+
+  document.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((a) => {
+    const text = normalizeVisibleText(a.textContent ?? "");
+    if (
+      AD_TEXT_PHRASES.includes(text as (typeof AD_TEXT_PHRASES)[number]) ||
+      a.href.includes("/ads/library") ||
+      a.href.includes("/ads/archive")
+    ) {
+      if (!seen.has(a.href)) {
+        seen.add(a.href);
+        urls.push(a.href);
+      }
+    }
+  });
+  return urls;
+}
+
+/** 通过 background script 下载单个文件 */
+function downloadViaBackground(url: string, filename: string): void {
+  chrome.runtime.sendMessage(
+    { type: "DOWNLOAD_MEDIA", url, filename },
+    (resp) => {
+      if (chrome.runtime.lastError) {
+        logError("下载消息发送失败", chrome.runtime.lastError.message);
+        return;
+      }
+      if (!resp?.ok) {
+        logError("下载失败", resp?.error ?? "未知错误");
+      }
+    }
+  );
+}
+
+/** 生成文件名（从 URL 提取，必要时加序号和时间戳） */
+function buildFilename(url: string, index: number, ext?: string): string {
+  try {
+    const u = new URL(url);
+    // 取路径最后一段，去掉查询参数
+    const base = u.pathname.split("/").filter(Boolean).pop() ?? `media_${index}`;
+    // 保留原始扩展名，或强制指定的 ext
+    const dotIdx = base.lastIndexOf(".");
+    const name = dotIdx > 0 ? base.slice(0, dotIdx) : base;
+    const extension = ext ?? (dotIdx > 0 ? base.slice(dotIdx + 1) : "jpg");
+    return `adlib-pro/${Date.now()}_${index}_${name}.${extension}`;
+  } catch {
+    return `adlib-pro/${Date.now()}_${index}.${ext ?? "jpg"}`;
+  }
+}
+
+// ── action handler ────────────────────────────────────────────────────────────
+
 function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
   logInfo("handleToolbarAction", { actionKey, anchorSnippet: anchorDiv.className?.toString?.().slice(0, 80) });
+
   switch (actionKey) {
-    case "download-image":
-      window.alert("下载图片（占位）：后续可在此读取当前广告卡片内的图片地址并下载。");
-      break;
-    case "download-video":
-      window.alert("下载视频（占位）：后续可在此读取视频 src 并下载。");
-      break;
-    case "copy-ad-info": {
-      const text = anchorDiv.innerText?.slice(0, 2000) ?? "";
-      const p = navigator.clipboard?.writeText(text);
-      if (p) {
-        void p.then(
-          () => window.alert("已复制当前区块部分文本（占位）。"),
-          () => window.prompt("复制失败，请手动复制：", text)
-        );
+    case "open-ad": {
+      const url = findAdDetailUrl(anchorDiv);
+      if (url) {
+        chrome.runtime.sendMessage({ type: "OPEN_TAB", url });
       } else {
-        window.prompt("请手动复制：", text);
+        logWarn("open-ad: 未找到广告详情链接");
+        window.alert("未找到广告详情链接，请确认当前广告卡片已完全加载。");
       }
       break;
     }
+
+    case "open-all-ads": {
+      const urls = collectAllAdUrls();
+      if (urls.length === 0) {
+        window.alert("当前页面未找到任何广告链接，请等待页面加载完成后重试。");
+        break;
+      }
+      logInfo(`open-all-ads: 共找到 ${urls.length} 个广告链接`);
+      chrome.runtime.sendMessage({ type: "OPEN_TABS", urls });
+      break;
+    }
+
+    case "download": {
+      const { images, videos } = extractMediaUrls(anchorDiv);
+      logInfo("download: 媒体资源", { images: images.length, videos: videos.length });
+
+      if (images.length === 0 && videos.length === 0) {
+        window.alert("当前广告卡片中未找到可下载的图片或视频，请等待媒体加载完成后重试。");
+        break;
+      }
+
+      // 视频优先下载
+      if (videos.length > 0) {
+        videos.forEach((url, i) => {
+          const ext = url.includes(".mp4") ? "mp4" : url.includes(".webm") ? "webm" : "mp4";
+          downloadViaBackground(url, buildFilename(url, i, ext));
+        });
+        logInfo(`download: 已发起 ${videos.length} 个视频下载`);
+      } else {
+        images.forEach((url, i) => {
+          const ext = url.includes(".png") ? "png" : url.includes(".webp") ? "webp" : "jpg";
+          downloadViaBackground(url, buildFilename(url, i, ext));
+        });
+        logInfo(`download: 已发起 ${images.length} 个图片下载`);
+      }
+      break;
+    }
+
     default:
       window.alert(`未知动作: ${actionKey}`);
   }
@@ -198,9 +337,9 @@ function createInlineButton(label: string,actionKey: string, anchorDiv: HTMLElem
 function buildActionsWrap(anchorDiv: HTMLElement): HTMLDivElement {
   const wrap = document.createElement("div");
   wrap.className = ACTIONS_WRAP_CLASS;
-  wrap.appendChild(createInlineButton("Open Ad", "download-image", anchorDiv));
-  wrap.appendChild(createInlineButton("Open All Ads", "download-video", anchorDiv));
-  wrap.appendChild(createInlineButton("Download", "copy-ad-info", anchorDiv));
+  wrap.appendChild(createInlineButton("Open Ad", "open-ad", anchorDiv));
+  wrap.appendChild(createInlineButton("Open All Ads", "open-all-ads", anchorDiv));
+  wrap.appendChild(createInlineButton("Download", "download", anchorDiv));
   return wrap;
 }
 
