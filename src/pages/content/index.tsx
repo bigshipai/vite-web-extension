@@ -17,6 +17,9 @@ const TOOLBAR_ABOVE_HR_CLASS = "adlib-pro-toolbar-above-hr";
 const AD_DIVIDER_HR_SELECTOR_EXACT =
   "hr.xjbqb8w.xso031l.x1q0q8m5.xqtp20y.xb9moi8.xe76qn7.x21b0me.x142aazg.xw7yly9.x1ys307a.x1yztbdb.xyqm7xq";
 
+const AD_DIVIDER_HR_SELECTOR_FALLBACK =
+  "hr.xjbqb8w.xso031l.x1q0q8m5.xqtp20y.xb9moi8";
+
 /** 与 Facebook 文案一致（全词匹配，空白规范化） */
 const AD_TEXT_PHRASES = ["See ad details", "See summary details"] as const;
 
@@ -96,35 +99,60 @@ function injectStyles(): void {
     }
 
     .${TOOLBAR_ABOVE_HR_CLASS} .${ACTIONS_WRAP_CLASS} {
-      width: 100%;
+      width: 95%;
       box-sizing: border-box;
     }
 
     .${ACTIONS_WRAP_CLASS} {
       display: flex;
-      gap: 8px;
+      align-items: center;
+      gap: 5px;
       flex-wrap: wrap;
+      padding: 2px 2 2px 2px;
     }
 
+    /* 贴近 Ads Library「See ad details / See summary details」次要按钮：白底、细边框、Meta 蓝字 */
     .${ACTION_BUTTON_CLASS} {
-      border: none;
+      align-items: center;
+      justify-content: center;
+      display: flex;
+      appearance: none;
+      -webkit-appearance: none;
+      margin: 0;
+      box-sizing: border-box;
       border-radius: 6px;
-      background: #1877f2;
-      color: #fff;
-      font-size: 13px;
-      font-weight: 600;
-      line-height: 1.2;
-      padding: 8px 12px;
-      cursor: pointer;
+      border: 1px solid #CCD0D5;
+      background-color: #FFFFFF;
+      color: #216FDB;
       font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.3333;
+      padding: 5px 20px;
+      cursor: pointer;
       box-shadow: none;
+      transition: background-color 0.1s ease, border-color 0.1s ease;
     }
 
     .${ACTION_BUTTON_CLASS}:hover {
-      background: #166fe0;
+      background-color: #F0F2F5;
+      border-color: #BEC3C9;
+    }
+
+    .${ACTION_BUTTON_CLASS}:active {
+      background-color: #E4E6EB;
+    }
+
+    .${ACTION_BUTTON_CLASS}:focus {
+      outline: none;
+    }
+
+    .${ACTION_BUTTON_CLASS}:focus-visible {
+      outline: 2px solid #216FDB;
+      outline-offset: 2px;
     }
   `;
-  // document.head.appendChild(style);
+  document.head.appendChild(style);
   logInfo("injectStyles: 已注入样式");
 }
 
@@ -155,11 +183,7 @@ function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
   }
 }
 
-function createInlineButton(
-  label: string,
-  actionKey: string,
-  anchorDiv: HTMLElement
-): HTMLButtonElement {
+function createInlineButton(label: string,actionKey: string, anchorDiv: HTMLElement): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = ACTION_BUTTON_CLASS;
@@ -174,9 +198,9 @@ function createInlineButton(
 function buildActionsWrap(anchorDiv: HTMLElement): HTMLDivElement {
   const wrap = document.createElement("div");
   wrap.className = ACTIONS_WRAP_CLASS;
-  wrap.appendChild(createInlineButton("下载图片", "download-image", anchorDiv));
-  wrap.appendChild(createInlineButton("下载视频", "download-video", anchorDiv));
-  wrap.appendChild(createInlineButton("复制素材信息", "copy-ad-info", anchorDiv));
+  wrap.appendChild(createInlineButton("Open Ad", "download-image", anchorDiv));
+  wrap.appendChild(createInlineButton("Open All Ads", "download-video", anchorDiv));
+  wrap.appendChild(createInlineButton("Download", "copy-ad-info", anchorDiv));
   return wrap;
 }
 
@@ -188,7 +212,14 @@ function findDividerHrElements(): HTMLHRElement[] {
     logVerbose("findDividerHrElements: 精确 class 命中", { count: exact.length });
     return exact;
   }
-  return exact;
+  const loose = Array.from(
+    document.querySelectorAll<HTMLHRElement>(AD_DIVIDER_HR_SELECTOR_FALLBACK)
+  );
+  logVerbose("findDividerHrElements: 使用回退选择器", {
+    count: loose.length,
+    selector: AD_DIVIDER_HR_SELECTOR_FALLBACK,
+  });
+  return loose;
 }
 
 /** 从 hr 向上找广告卡片范围，供复制/后续抓取用 */
@@ -285,14 +316,22 @@ function injectToolbarAsNextSibling(anchorDiv: HTMLElement): boolean {
 
 function addInlineActionsForCard(): void {
   const hrs = findDividerHrElements();
-  console.log("hrs", hrs);
+  logVerbose("addInlineActionsForCard: hr 候选", { count: hrs.length });
   if (hrs.length > 0) {
     let newlyInjected = 0;
     for (const hr of hrs) {
       if (injectToolbarAboveHr(hr)) newlyInjected += 1;
     }
+    logInfo("addInlineActionsForCard: 扫描完成（hr 分隔线锚点）", {
+      hrCount: hrs.length,
+      newlyInjected,
+    });
     return;
   }
+
+  logWarn("addInlineActionsForCard: 未命中目标 hr，回退到文案锚点", {
+    exactSelector: AD_DIVIDER_HR_SELECTOR_EXACT,
+  });
 
   const matches = findMinimalPhraseElements();
   logVerbose("findMinimalPhraseElements", { count: matches.length });

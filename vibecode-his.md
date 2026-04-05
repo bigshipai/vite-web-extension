@@ -17,3 +17,5 @@ xpath应该怎么使用和获取
 能否通过文本找到对应的位置。「See summary details」或者 「See ad details」，然后在文本所在的div的并列位置增加div展示所需的按钮和逻辑
 
 找到元素 「<hr class="xjbqb8w xso031l x1q0q8m5 xqtp20y xb9moi8 xe76qn7 x21b0me x142aazg xw7yly9 x1ys307a x1yztbdb xyqm7xq">」, 可以通过class选择器进行选择，然后在他的上面增加按钮，且css样式可以和这个保持一致
+
+以上为增加按钮区域的部分html内容，现在需要调整添加按钮的ui，需要和 See ad details的样式相近。风格一致
