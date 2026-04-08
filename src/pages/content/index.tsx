@@ -1,5 +1,198 @@
 import "./style.css";
 
+interface AdInfo {
+  ad_archive_id: string;
+  page_name?: string;
+  page_id?: string;
+  link_url?:string;
+  caption?: string;
+  cta_text?: string;
+  page_like_count?: number;
+  start_date?: number; // unix timestamp
+}
+
+/** ad_archive_id → AdInfo */
+const adInfoStore = new Map<string, AdInfo>();
+
+const AD_INFO_PANEL_CLASS = "adlib-pro-info-panel";
+
+/**
+ * 从已加载的 HTML 中解析所有 <script type="application/json" data-sjs> 标签，
+ * 提取首屏广告数据（Relay 服务端预加载，不经过 fetch）。/html/body/script[55]
+ */
+function parseInlineScriptData(): void {
+  document.querySelectorAll<HTMLScriptElement>('script[type="application/json"]').forEach((el) => {
+    try {
+      const json = JSON.parse(el.textContent ?? "");
+      const ads: AdInfo[] = [];
+      walkForAdLibraryMain(json, ads);
+      if (ads.length > 0) {
+        for (const ad of ads) adInfoStore.set(ad.ad_archive_id, ad);
+        // logInfo("parseInlineScriptData: 解析到广告数据", ads);
+      }
+    } catch (_) { /* 非 JSON 的 script 标签，忽略 */ }
+  });
+}
+
+/**
+ * 解析 body > script:nth-child(61) 的内容并输出到控制台。
+ * body > script:nth-child(61)//*[@id="facebook"]/body/script[55]
+ * //*[@id="facebook"]/body/script[55]
+ */
+function parseAndLogScriptNthChild(): void {
+  const el = document.querySelector<HTMLScriptElement>("#facebook > body > script:nth-of-type(55)");
+  if (!el) {
+    return;
+  }
+  const raw = el.textContent ?? "";
+  try {
+    const json = JSON.parse(raw);
+    //遍历json，要从最外层，找到最内层，递归调用 找到 ad_library_main，并打印出来
+    const ads: AdInfo[] = [];
+    walkForAdLibraryMain(json,ads);
+    if (ads.length > 0) {
+      for (const ad of ads) adInfoStore.set(ad.ad_archive_id, ad);
+    }
+  } catch (_) {
+  }
+}
+
+function walkForAdLibraryMain(node: unknown, ads: AdInfo[], depth = 0): void {
+
+  if (!node || typeof node !== "object" || depth > 12) return;
+  const obj = node as Record<string, unknown>;
+
+  // 直接命中
+  if (obj.ad_library_main) {
+    extractEdges(obj.ad_library_main, ads);
+    return;
+  }
+
+  // Relay __bbox 结构
+  if (obj.__bbox) {
+    walkForAdLibraryMain(obj.__bbox, ads, depth + 1);
+    return;
+  }
+
+  // result.data 路径
+  if (obj.result) walkForAdLibraryMain(obj.result, ads, depth + 1);
+  if (obj.data) walkForAdLibraryMain(obj.data, ads, depth + 1);
+  if (obj.require) walkForAdLibraryMain(obj.require, ads, depth + 1);
+  
+  // require 数组（ScheduledServerJS 格式）
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+        walkForAdLibraryMain(item, ads, depth + 1);
+    }
+  }
+}
+
+/** 从 ad_library_main 提取所有广告并推入 ads 数组 */
+function extractEdges(main: unknown, ads: AdInfo[]): void {
+
+  if (!main || typeof main !== "object") return;
+  const m = main as Record<string, unknown>;
+  const conn = m.search_results_connection as Record<string, unknown> | undefined;
+  if (!conn) return;
+
+  const edges = (conn.edges as unknown[]) ?? [];
+
+  for (const edge of edges) {
+    if (!edge || typeof edge !== "object") continue;
+    const node = ((edge as Record<string, unknown>).node ?? {}) as Record<string, unknown>;
+    const collated = (node.collated_results as unknown[]) ?? [];
+    for (const item of collated) {
+      pushAd(item, ads);
+    }
+    // node 本身也可能有 ad_archive_id（非 collated 情况）
+    if (node.ad_archive_id) pushAd(node, ads);
+  }
+}
+
+/** 从单个广告节点提取字段并推入 ads */
+function pushAd(item: unknown, ads: AdInfo[]): void {
+  if (!item || typeof item !== "object") return;
+  const s = item as Record<string, unknown>;
+  const id = s.ad_archive_id;
+  if (!id) return;
+  const snap = (s.snapshot ?? {}) as Record<string, unknown>;
+  const body = (snap.body ?? {}) as Record<string, unknown>;
+  ads.push({
+    ad_archive_id: String(id),
+    page_name: (s.page_name ?? snap.page_name ?? null) as string | undefined,
+    caption: (body.text ?? snap.caption ?? null) as string | undefined,
+    cta_text: (snap.cta_text ?? null) as string | undefined,
+    page_id: (s.page_id ?? snap.page_id ?? null) as string | undefined,  
+    link_url:(s.link_url ?? snap.link_url ?? null) as string | undefined,  
+    // page_like_count 在 snapshot 里
+    page_like_count: (snap.page_like_count ?? null) as number | undefined,
+    start_date: (s.start_date ?? null) as number | undefined,
+  });
+}
+
+/** 格式化 Unix 时间戳为 YYYY-MM-DD */
+function formatDate(ts: number): string {
+  const d = new Date(ts * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+/** 构建信息面板 DOM */
+function buildInfoPanel(ad: AdInfo): HTMLDivElement {
+
+  const panel = document.createElement("div");
+  panel.className = AD_INFO_PANEL_CLASS;
+
+  const rows: Array<[string, string]> = [];
+  // if (ad.page_name) rows.push(["Page", ad.page_name]);
+  if (ad.page_like_count != null) rows.push(["Likes:", ad.page_like_count.toLocaleString()]);
+  if (ad.start_date != null) rows.push(["Started:", formatDate(ad.start_date)]);
+  if (ad.cta_text) rows.push(["CTA:", ad.cta_text]);
+  // 对 ad.link_url. 进行解析,仅仅返回域名就可以了
+  if (ad.link_url) {
+    try {
+      const url = new URL(ad.link_url);
+      rows.push(["Link:", url.hostname]);
+    } catch {
+      // ignore invalid URL errors, do not add domain row
+    }
+  }
+  // if (ad.link_url) rows.push(["Link:", ad.link_url]);
+  // if (ad.caption) rows.push(["Caption", ad.caption.slice(0, 200) + (ad.caption.length > 200 ? "…" : "")]);
+
+  panel.innerHTML = rows
+    .map(([k, v]) => `<span class="adlib-pro-info-key">${k}</span><span class="adlib-pro-info-val">${escapeHtml(v)}</span>`)
+    .join("");
+
+  return panel;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** 更新或插入某个工具栏容器内的信息面板 */
+function updateInfoPanelInToolbar(toolbarOuter: HTMLElement): void {
+  const adId = toolbarOuter.getAttribute("data-ad-id");
+  if (!adId) return;
+  const ad = adInfoStore.get(adId);
+  let panel = toolbarOuter.querySelector<HTMLDivElement>(`.${AD_INFO_PANEL_CLASS}`);
+  if (!ad) return; // 数据还没到，等下次刷新
+  if (!panel) {
+    panel = buildInfoPanel(ad);
+    toolbarOuter.appendChild(panel);
+  } else {
+    const fresh = buildInfoPanel(ad);
+    panel.replaceWith(fresh);
+  }
+}
+
+/** 刷新页面所有已渲染工具栏的信息面板 */
+function refreshAllInfoPanels(): void {
+  document.querySelectorAll<HTMLElement>(
+    `.${TOOLBAR_ABOVE_HR_CLASS}[data-ad-id], .${TOOLBAR_WRAP_CLASS}[data-ad-id]`
+  ).forEach(updateInfoPanelInToolbar);
+}
+
 const ADS_LIBRARY_PATH = "/ads/library";
 const INJECTED_FLAG_ATTR = "data-adlib-pro-injected";
 const STYLE_TAG_ID = "adlib-pro-style-tag";
@@ -17,40 +210,12 @@ const TOOLBAR_ABOVE_HR_CLASS = "adlib-pro-toolbar-above-hr";
 const AD_DIVIDER_HR_SELECTOR_EXACT =
   "hr.xjbqb8w.xso031l.x1q0q8m5.xqtp20y.xb9moi8.xe76qn7.x21b0me.x142aazg.xw7yly9.x1ys307a.x1yztbdb.xyqm7xq";
 
-const AD_DIVIDER_HR_SELECTOR_FALLBACK =
-  "hr.xjbqb8w.xso031l.x1q0q8m5.xqtp20y.xb9moi8";
-
-/** 与 Facebook 文案一致（全词匹配，空白规范化） */
-const AD_TEXT_PHRASES = ["See ad details", "See summary details"] as const;
-
-const LOG_NS = "[AdLib Pro]";
-
 function isDebugVerbose(): boolean {
   try {
     return window.localStorage.getItem("adlibProDebug") === "1";
   } catch {
     return false;
   }
-}
-
-function logInfo(...args: unknown[]): void {
-  console.log(LOG_NS, ...args);
-}
-
-function logWarn(...args: unknown[]): void {
-  console.warn(LOG_NS, ...args);
-}
-
-function logError(...args: unknown[]): void {
-  console.error(LOG_NS, ...args);
-}
-
-function logVerbose(...args: unknown[]): void {
-  if (isDebugVerbose()) console.log(LOG_NS, "[verbose]", ...args);
-}
-
-function normalizeVisibleText(raw: string): string {
-  return raw.replace(/\s+/g, " ").trim();
 }
 
 function isFacebookAdsLibraryPage(): boolean {
@@ -61,10 +226,7 @@ function isFacebookAdsLibraryPage(): boolean {
 }
 
 function injectStyles(): void {
-  if (document.getElementById(STYLE_TAG_ID)) {
-    logVerbose("injectStyles: 已存在，跳过");
-    return;
-  }
+  if (document.getElementById(STYLE_TAG_ID)) return;
 
   const style = document.createElement("style");
   style.id = STYLE_TAG_ID;
@@ -94,21 +256,22 @@ function injectStyles(): void {
       width: 100%;
       border: none !important;
       height: auto !important;
+      padding: 1px 1px 1px 10px;
       min-height: 0 !important;
       background: transparent !important;
     }
 
     .${TOOLBAR_ABOVE_HR_CLASS} .${ACTIONS_WRAP_CLASS} {
-      width: 95%;
+      width: 100%;
       box-sizing: border-box;
+      padding: 1px 1px 2px 5px;
     }
 
     .${ACTIONS_WRAP_CLASS} {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 2px;
       flex-wrap: wrap;
-      padding: 2px 2 2px 2px;
     }
 
     /* 贴近 Ads Library「See ad details / See summary details」次要按钮：白底、细边框、Meta 蓝字 */
@@ -151,12 +314,34 @@ function injectStyles(): void {
       outline: 2px solid #216FDB;
       outline-offset: 2px;
     }
+
+    .${AD_INFO_PANEL_CLASS} {
+      display: grid;
+      grid-template-columns: 1fr 3fr 1fr 5fr;
+      column-gap: 5px;
+      row-gap: 1px;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 2px 2px 2px 10px;
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .adlib-pro-info-key {
+      color: #216FDB;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .adlib-pro-info-val {
+      color: #1C1E21;
+      word-break: break-word;
+    }
   `;
   document.head.appendChild(style);
-  logInfo("injectStyles: 已注入样式");
+  console.log("injectStyles: 已注入样式");
 }
-
-// ── helpers ──────────────────────────────────────────────────────────────────
 
 /** 从广告卡片上下文提取所有图片/视频 URL */
 function extractMediaUrls(context: HTMLElement): { images: string[]; videos: string[] } {
@@ -176,6 +361,8 @@ function extractMediaUrls(context: HTMLElement): { images: string[]; videos: str
     const src = img.src;
     if (!src || src.startsWith("data:") || src.endsWith(".svg")) return;
     if (img.naturalWidth <= 1 || img.naturalHeight <= 1) return;
+    //过滤掉头像照片
+    if (img.className.startsWith("_8nqq img")) return;
     images.push(src);
   });
 
@@ -193,43 +380,82 @@ function extractMediaUrls(context: HTMLElement): { images: string[]; videos: str
 
 /** 从广告卡片找到"See ad details"链接或最近的 <a> 指向广告详情页 */
 function findAdDetailUrl(context: HTMLElement): string | null {
-  // 优先找文字为 "See ad details" / "See summary details" 的链接
-  const anchors = Array.from(context.querySelectorAll<HTMLAnchorElement>("a[href]"));
-  for (const a of anchors) {
-    const text = normalizeVisibleText(a.textContent ?? "");
-    if (AD_TEXT_PHRASES.includes(text as (typeof AD_TEXT_PHRASES)[number])) {
-      return a.href;
-    }
-  }
-  // 回退：找 /ads/library?id= 或 /ads/archive/ 链接
-  for (const a of anchors) {
-    if (a.href.includes("/ads/library") || a.href.includes("/ads/archive")) {
-      return a.href;
-    }
-  }
-  return null;
-}
+    // 1. 获取当前完整 URL
+  const adlibarayId = findAdLibraryIdByAttr(context);
 
-/** 收集页面上所有可见广告卡片的详情链接 */
-function collectAllAdUrls(): string[] {
-  const urls: string[] = [];
-  const seen = new Set<string>();
+  const adsinfo = adInfoStore.get(adlibarayId)
+  // 关键：广告信息不存在时直接返回 null（避免后续报错）
+  if (!adsinfo) {
+    return null;
+  }
+  const currentUrl = getFullUrl();
 
-  document.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((a) => {
-    const text = normalizeVisibleText(a.textContent ?? "");
-    if (
-      AD_TEXT_PHRASES.includes(text as (typeof AD_TEXT_PHRASES)[number]) ||
-      a.href.includes("/ads/library") ||
-      a.href.includes("/ads/archive")
-    ) {
-      if (!seen.has(a.href)) {
-        seen.add(a.href);
-        urls.push(a.href);
-      }
-    }
+  // 2. 解析参数（TS 自动推导类型：Record<string, string>）
+  // const params = parseUrlParams();
+
+  // 3. 生成新 URL（不跳转）
+  const newUrl = createUrlWithNewParams({
+    view_all_page_id: adsinfo?.page_id ?? '',
+    q:adsinfo?.page_name??''
   });
-  return urls;
+  return newUrl;  
 }
+/**
+ * 获取当前页面完整 URL
+ */
+export const getFullUrl = (): string => {
+  return window.location.href;
+};
+
+/**
+ * 解析 URL 参数，返回键值对对象
+ */
+export const parseUrlParams = (): Record<string, string> => {
+  const params = new URLSearchParams(window.location.search);
+  const paramObj: Record<string, string> = {};
+  
+  for (const [key, value] of params.entries()) {
+    paramObj[key] = value;
+  }
+  
+  return paramObj;
+};
+
+/**
+ * 替换/新增 URL 参数，并返回新 URL
+ * @param newParams 要覆盖的参数
+ */
+export const createUrlWithNewParams = (newParams: Record<string, string | number | boolean>): string => {
+  // 基础路径（协议 + 域名 + 路径）
+  const baseUrl = `${window.location.origin}${window.location.pathname}`;
+  const searchParams = new URLSearchParams(window.location.search);
+
+  // 覆盖参数
+  Object.entries(newParams).forEach(([key, value]) => {
+    searchParams.set(key, String(value));
+  });
+
+  // 拼接最终 URL
+  return `${baseUrl}?${searchParams.toString()}`;
+};
+
+/**
+ * 替换参数并直接跳转页面
+ * @param newParams 要覆盖的参数
+ * @param replaceHistory 是否替换历史记录（默认 false）
+ */
+export const redirectWithNewParams = (
+  newParams: Record<string, string | number | boolean>,
+  replaceHistory = false
+): void => {
+  const newUrl = createUrlWithNewParams(newParams);
+  
+  if (replaceHistory) {
+    window.location.replace(newUrl);
+  } else {
+    window.location.href = newUrl;
+  }
+};
 
 /** 通过 background script 下载单个文件 */
 function downloadViaBackground(url: string, filename: string): void {
@@ -237,11 +463,10 @@ function downloadViaBackground(url: string, filename: string): void {
     { type: "DOWNLOAD_MEDIA", url, filename },
     (resp) => {
       if (chrome.runtime.lastError) {
-        logError("下载消息发送失败", chrome.runtime.lastError.message);
         return;
       }
       if (!resp?.ok) {
-        logError("下载失败", resp?.error ?? "未知错误");
+        console.log("下载失败", resp?.error ?? "未知错误");
       }
     }
   );
@@ -263,65 +488,17 @@ function buildFilename(url: string, index: number, ext?: string): string {
   }
 }
 
-// ── action handler ────────────────────────────────────────────────────────────
-
-function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
-  logInfo("handleToolbarAction", { actionKey, anchorSnippet: anchorDiv.className?.toString?.().slice(0, 80) });
-
-  switch (actionKey) {
-    case "open-ad": {
-      const url = findAdDetailUrl(anchorDiv);
-      if (url) {
-        chrome.runtime.sendMessage({ type: "OPEN_TAB", url });
-      } else {
-        logWarn("open-ad: 未找到广告详情链接");
-        window.alert("未找到广告详情链接，请确认当前广告卡片已完全加载。");
-      }
-      break;
-    }
-
-    case "open-all-ads": {
-      const urls = collectAllAdUrls();
-      if (urls.length === 0) {
-        window.alert("当前页面未找到任何广告链接，请等待页面加载完成后重试。");
-        break;
-      }
-      logInfo(`open-all-ads: 共找到 ${urls.length} 个广告链接`);
-      chrome.runtime.sendMessage({ type: "OPEN_TABS", urls });
-      break;
-    }
-
-    case "download": {
-      const { images, videos } = extractMediaUrls(anchorDiv);
-      logInfo("download: 媒体资源", { images: images.length, videos: videos.length });
-
-      if (images.length === 0 && videos.length === 0) {
-        window.alert("当前广告卡片中未找到可下载的图片或视频，请等待媒体加载完成后重试。");
-        break;
-      }
-
-      // 视频优先下载
-      if (videos.length > 0) {
-        videos.forEach((url, i) => {
-          const ext = url.includes(".mp4") ? "mp4" : url.includes(".webm") ? "webm" : "mp4";
-          downloadViaBackground(url, buildFilename(url, i, ext));
-        });
-        logInfo(`download: 已发起 ${videos.length} 个视频下载`);
-      } else {
-        images.forEach((url, i) => {
-          const ext = url.includes(".png") ? "png" : url.includes(".webp") ? "webp" : "jpg";
-          downloadViaBackground(url, buildFilename(url, i, ext));
-        });
-        logInfo(`download: 已发起 ${images.length} 个图片下载`);
-      }
-      break;
-    }
-
-    default:
-      window.alert(`未知动作: ${actionKey}`);
-  }
+//界面上添加按钮
+function buildActionsWrap(anchorDiv: HTMLElement): HTMLDivElement {
+  const wrap = document.createElement("div");
+  wrap.className = ACTIONS_WRAP_CLASS;
+  wrap.appendChild(createInlineButton("Open Page Ads", "open-page-ads", anchorDiv));
+  wrap.appendChild(createInlineButton("Open Link Ads", "open-link-ads", anchorDiv));
+  wrap.appendChild(createInlineButton("Download", "download", anchorDiv));
+  return wrap;
 }
 
+// 界面上添加按钮对应的事件
 function createInlineButton(label: string,actionKey: string, anchorDiv: HTMLElement): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -333,14 +510,81 @@ function createInlineButton(label: string,actionKey: string, anchorDiv: HTMLElem
   });
   return button;
 }
+// 实现key对应的事件
+function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
 
-function buildActionsWrap(anchorDiv: HTMLElement): HTMLDivElement {
-  const wrap = document.createElement("div");
-  wrap.className = ACTIONS_WRAP_CLASS;
-  wrap.appendChild(createInlineButton("Open Ad", "open-ad", anchorDiv));
-  wrap.appendChild(createInlineButton("Open All Ads", "open-all-ads", anchorDiv));
-  wrap.appendChild(createInlineButton("Download", "download", anchorDiv));
-  return wrap;
+  switch (actionKey) {
+    case "open-page-ads": {
+      const url = findAdDetailUrl(anchorDiv);
+      if (url) {
+        chrome.runtime.sendMessage({ type: "OPEN_TAB", url });
+      } else {
+        window.alert("未找到广告详情链接，请确认当前广告卡片已完全加载。");
+      }
+      break;
+    }
+
+    case "open-link-ads": {
+      const url = openLinkAdsUrl(anchorDiv);
+      if (url) {
+        chrome.runtime.sendMessage({ type: "OPEN_TAB", url });
+      }else{
+        window.alert("当前页面未找到任何广告链接，请等待页面加载完成后重试。");
+        break;
+      }
+      break;
+    }
+
+    case "download": {
+      const { images, videos } = extractMediaUrls(anchorDiv);
+      if (images.length === 0 && videos.length === 0) {
+        window.alert("当前广告卡片中未找到可下载的图片或视频，请等待媒体加载完成后重试。");
+        break;
+      }
+
+      // 视频优先下载
+      if (videos.length > 0) {
+        videos.forEach((url, i) => {
+          const ext = url.includes(".mp4") ? "mp4" : url.includes(".webm") ? "webm" : "mp4";
+          downloadViaBackground(url, buildFilename(url, i, ext));
+        });
+      } else {
+        images.forEach((url, i) => {
+          const ext = url.includes(".png") ? "png" : url.includes(".webp") ? "webp" : "jpg";
+          downloadViaBackground(url, buildFilename(url, i, ext));
+        });
+      }
+      break;
+    }
+
+    default:
+      window.alert(`未知动作: ${actionKey}`);
+  }
+}
+
+function openLinkAdsUrl(context: HTMLElement): string | null {
+    // 1. 获取当前完整 URL
+    const adlibarayId = findAdLibraryIdByAttr(context);
+    const adsinfo = adInfoStore.get(adlibarayId)
+    // 关键：广告信息不存在时直接返回 null（避免后续报错）
+    if (!adsinfo) {
+      return null;
+    }
+    // 3. 生成新 URL（不跳转）
+    const newUrl = createUrlWithNewParams({
+      q: getHostname(adsinfo?.link_url)
+    });
+    return newUrl;  
+}
+
+// 安全获取 URL 的 hostname，不会抛错
+function getHostname(url?: string | null): string {
+  if (!url) return '';
+  try {
+    return new URL(url).hostname || '';
+  } catch {
+    return '';
+  }
 }
 
 function findDividerHrElements(): HTMLHRElement[] {
@@ -348,23 +592,13 @@ function findDividerHrElements(): HTMLHRElement[] {
     document.querySelectorAll<HTMLHRElement>(AD_DIVIDER_HR_SELECTOR_EXACT)
   );
   if (exact.length > 0) {
-    logVerbose("findDividerHrElements: 精确 class 命中", { count: exact.length });
     return exact;
   }
-  const loose = Array.from(
-    document.querySelectorAll<HTMLHRElement>(AD_DIVIDER_HR_SELECTOR_FALLBACK)
-  );
-  logVerbose("findDividerHrElements: 使用回退选择器", {
-    count: loose.length,
-    selector: AD_DIVIDER_HR_SELECTOR_FALLBACK,
-  });
-  return loose;
+  return exact;
 }
 
 /** 从 hr 向上找广告卡片范围，供复制/后续抓取用 */
 function getAdContextFromHr(hr: HTMLElement): HTMLElement {
-  const article = hr.closest<HTMLElement>('[role="article"]');
-  if (article) return article;
   let p: HTMLElement | null = hr.parentElement;
   for (let i = 0; i < 8 && p; i += 1) {
     if (p.children.length >= 2) return p;
@@ -373,131 +607,83 @@ function getAdContextFromHr(hr: HTMLElement): HTMLElement {
   return hr.parentElement ?? hr;
 }
 
+function findAdLibraryIdByAttr(context: HTMLElement): string {
+  // 遍历当前元素的所有直接子元素
+  for (let i = 0; i < context.children.length; i++) {
+    const child = context.children[i];
+    // 检查子元素是否包含 data-ad-id 属性
+    if (child.hasAttribute("data-ad-id")) {
+      // 获取并去除首尾空格，保证返回值不为 undefined
+      return child.getAttribute("data-ad-id")?.trim() || "";
+    }
+  }
+  // 遍历完所有子元素都未找到，返回空字符串
+  return "";
+}
+
+function findAdLibraryId(hr:HTMLElement,element:HTMLElement,q:string): void {
+  
+    if (!element) {
+      return;
+    }
+
+    if(element.children.length>0){
+      for (let i = 0; i < element.children.length; i++) {
+        const child = element.children[i];
+        findAdLibraryId(hr,child as HTMLElement, q);
+      }
+    }else{
+      const textContent = element.textContent?.trim();
+      // 检查文本是否符合"Library ID: 数字"的格式
+      if (textContent && textContent.startsWith(q)) {
+        // 提取ID部分
+        const parts = textContent.split(":");
+        if (parts.length >= 2) {
+          const adId = parts[1]?.trim(); // 直接返回冒号后的部分
+          const outer = document.createElement("div");
+          outer.className = `${TOOLBAR_ABOVE_HR_CLASS}`;
+
+          const context = getAdContextFromHr(hr);
+          // 这里是他父类的元素
+          outer.appendChild(buildActionsWrap(context));
+
+          if (adId) outer.setAttribute("data-ad-id", adId);
+          const parent = hr.parentElement??null;
+          //TODO 
+          if(parent) parent.insertBefore(outer, hr);
+          if(adId) updateInfoPanelInToolbar(outer);
+          return;
+        }
+      }
+    }
+}
+
 /**
  * 在目标 hr 正上方插入工具栏；外层 div 复制 hr 的 className，继承 FB 版式 token，再用 TOOLBAR_ABOVE_HR_CLASS 覆盖布局。
  */
 function injectToolbarAboveHr(hr: HTMLHRElement): boolean {
+  
   const prev = hr.previousElementSibling;
   if (prev?.classList.contains(TOOLBAR_ABOVE_HR_CLASS)) {
-    logVerbose("injectToolbarAboveHr: 已存在工具栏，跳过");
     return false;
   }
 
   const parent = hr.parentElement;
-  if (!parent) {
-    logWarn("injectToolbarAboveHr: hr 无 parent");
-    return false;
-  }
+  if (!parent) return false;
 
   const context = getAdContextFromHr(hr);
-  const outer = document.createElement("div");
-  const fbClasses = typeof hr.className === "string" ? hr.className.trim() : "";
-  outer.className = `${TOOLBAR_ABOVE_HR_CLASS}${fbClasses ? ` ${fbClasses}` : ""}`;
-  outer.appendChild(buildActionsWrap(context));
-
-  parent.insertBefore(outer, hr);
-  logVerbose("injectToolbarAboveHr: 已在 hr 前插入", {
-    fbClassPreview: fbClasses.slice(0, 80),
-  });
-  return true;
-}
-
-const PHRASE_SET = new Set<string>(AD_TEXT_PHRASES);
-
-/**
- * 找出文案完全等于目标短语的元素，并去掉「外层仍整段等于同文案」的祖先，保留最内层匹配节点。
- */
-function findMinimalPhraseElements(): HTMLElement[] {
-  const candidates: HTMLElement[] = [];
-  const selector = 'div, span, a, button, [role="button"]';
-  document.querySelectorAll<HTMLElement>(selector).forEach((el) => {
-    const t = normalizeVisibleText(el.textContent ?? "");
-    if (PHRASE_SET.has(t)) candidates.push(el);
-  });
-
-  return candidates.filter(
-    (el) => !candidates.some((other) => other !== el && el.contains(other))
-  );
-}
-
-/**
- * 「文本所在的 div」：若匹配节点本身是 div 则用它，否则取最近的 div 祖先。
- */
-function resolveAnchorDiv(matchEl: HTMLElement): HTMLElement | null {
-  if (matchEl instanceof HTMLDivElement) return matchEl;
-  return matchEl.closest("div");
-}
-
-/**
- * 在 anchorDiv 的并列位置（作为下一个兄弟节点）插入工具栏 div。
- */
-function injectToolbarAsNextSibling(anchorDiv: HTMLElement): boolean {
-  const next = anchorDiv.nextElementSibling;
-  if (next?.classList.contains(TOOLBAR_WRAP_CLASS)) {
-    logVerbose("injectToolbar: 已有兄弟工具栏，跳过", { tag: anchorDiv.tagName });
-    return false;
-  }
-
-  const parent = anchorDiv.parentElement;
-  if (!parent) {
-    logWarn("injectToolbar: anchorDiv 无 parent，跳过");
-    return false;
-  }
-
-  const outer = document.createElement("div");
-  outer.className = TOOLBAR_WRAP_CLASS;
-  outer.appendChild(buildActionsWrap(anchorDiv));
-
-  parent.insertBefore(outer, anchorDiv.nextSibling);
-  logVerbose("injectToolbar: 已在文案 div 后插入兄弟工具栏");
+  findAdLibraryId(hr,context,"Library ID:");
   return true;
 }
 
 function addInlineActionsForCard(): void {
   const hrs = findDividerHrElements();
-  logVerbose("addInlineActionsForCard: hr 候选", { count: hrs.length });
   if (hrs.length > 0) {
     let newlyInjected = 0;
     for (const hr of hrs) {
       if (injectToolbarAboveHr(hr)) newlyInjected += 1;
     }
-    logInfo("addInlineActionsForCard: 扫描完成（hr 分隔线锚点）", {
-      hrCount: hrs.length,
-      newlyInjected,
-    });
     return;
-  }
-
-  logWarn("addInlineActionsForCard: 未命中目标 hr，回退到文案锚点", {
-    exactSelector: AD_DIVIDER_HR_SELECTOR_EXACT,
-  });
-
-  const matches = findMinimalPhraseElements();
-  logVerbose("findMinimalPhraseElements", { count: matches.length });
-
-  let newlyInjected = 0;
-  let skippedNoDiv = 0;
-
-  for (const el of matches) {
-    const anchorDiv = resolveAnchorDiv(el);
-    if (!anchorDiv) {
-      skippedNoDiv += 1;
-      logVerbose("跳过：无法解析为 div", { tag: el.tagName });
-      continue;
-    }
-    if (injectToolbarAsNextSibling(anchorDiv)) newlyInjected += 1;
-  }
-
-  logInfo("addInlineActionsForCard: 扫描完成（文本锚点）", {
-    phraseMatches: matches.length,
-    newlyInjected,
-    skippedNoDiv,
-  });
-
-  if (matches.length === 0) {
-    logWarn("addInlineActionsForCard: 文案锚点也未找到，可能仍在加载、语言不同或 DOM 已变", {
-      url: window.location.href,
-    });
   }
 }
 
@@ -508,7 +694,7 @@ function setupMutationObserver(): void {
     if (debounceHandle !== undefined) {
       if (isDebugVerbose() && !pendingScheduleLogged) {
         pendingScheduleLogged = true;
-        logVerbose("MutationObserver: DOM 变化，已有待执行扫描，合并到同一防抖窗口");
+        console.log("MutationObserver: DOM 变化，已有待执行扫描，合并到同一防抖窗口");
       }
       return;
     }
@@ -516,22 +702,16 @@ function setupMutationObserver(): void {
       debounceHandle = undefined;
       pendingScheduleLogged = false;
       try {
-        logVerbose("MutationObserver: 防抖结束，执行扫描");
+        console.log("MutationObserver: 防抖结束，执行扫描");
         addInlineActionsForCard();
       } catch (e) {
-        logError("addInlineActionsForCard 异常", e);
+        console.log("addInlineActionsForCard 异常", e);
       }
     }, 800);
-    logVerbose("MutationObserver: 已安排 800ms 后扫描");
   };
 
   const root =
     document.querySelector<HTMLElement>('div[role="main"]') ?? document.body;
-
-  logInfo("setupMutationObserver: 开始监听", {
-    root: root === document.body ? "document.body" : 'div[role="main"]',
-    tag: root.tagName,
-  });
 
   const observer = new MutationObserver(() => {
     scheduleWork();
@@ -548,44 +728,33 @@ function applyLayoutAdjustments(): void {
 }
 
 function bootstrap(): void {
-  logInfo("bootstrap: 入口", {
-    href: window.location.href,
-    hostname: window.location.hostname,
-    pathname: window.location.pathname,
-    readyState: document.readyState,
-    verbose: isDebugVerbose(),
-    hrSelector: AD_DIVIDER_HR_SELECTOR_EXACT,
-    phrases: AD_TEXT_PHRASES,
-  });
 
-  if (!isFacebookAdsLibraryPage()) {
-    logInfo("bootstrap: 非 Ads Library 页面，退出", {
-      hostname: window.location.hostname,
-      pathname: window.location.pathname,
-    });
-    return;
-  }
+  if (!isFacebookAdsLibraryPage()) return;
 
-  if (document.documentElement.hasAttribute(INJECTED_FLAG_ATTR)) {
-    logWarn("bootstrap: 已注入过（data-adlib-pro-injected），跳过重复 bootstrap");
-    return;
-  }
+  if (document.documentElement.hasAttribute(INJECTED_FLAG_ATTR)) return;
+  
   //设置已注入标志
   document.documentElement.setAttribute(INJECTED_FLAG_ATTR, "true");
 
   injectStyles();
 
+  // 解析首屏内联 script JSON 数据（首次加载时数据嵌在 HTML 里，不经过 fetch）
+  // parseInlineScriptData();
+  parseAndLogScriptNthChild();
+
   applyLayoutAdjustments();
   addInlineActionsForCard();
+  
+  //首屏数据已就绪，立即填充信息面板
+  refreshAllInfoPanels();
+  // backfillMissingAdIds();
   setupMutationObserver();
 
-  logInfo("bootstrap: 完成初始化。详细日志: localStorage.setItem('adlibProDebug','1') 后刷新");
+  console.log("bootstrap: 完成初始化。");
 }
 
 if (document.readyState === "loading") {
-  logVerbose("等待 DOMContentLoaded 后 bootstrap");
   document.addEventListener("DOMContentLoaded", bootstrap, { once: true });
 } else {
-  logVerbose("document 已就绪，立即 bootstrap");
   bootstrap();
 }
