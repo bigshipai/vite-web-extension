@@ -135,6 +135,19 @@ function formatDate(ts: number): string {
   const d = new Date(ts * 1000);
   return d.toISOString().slice(0, 10);
 }
+/** 计算 Unix 时间戳距离今天的天数（正数表示未来，负数表示过去） */
+function getDaysFromToday(ts: number): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // 设置为今天的0点
+  
+  const targetDate = new Date(ts * 1000);
+  targetDate.setHours(0, 0, 0, 0); // 设置为目标日期的0点
+  
+  const timeDiff = today.getTime() - targetDate.getTime();
+  const daysDiff = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+  if(daysDiff<=1) return 1;
+  return daysDiff;
+}
 
 /** 构建信息面板 DOM */
 function buildInfoPanel(ad: AdInfo): HTMLDivElement {
@@ -145,7 +158,7 @@ function buildInfoPanel(ad: AdInfo): HTMLDivElement {
   const rows: Array<[string, string]> = [];
   // if (ad.page_name) rows.push(["Page", ad.page_name]);
   if (ad.page_like_count != null) rows.push(["Likes:", ad.page_like_count.toLocaleString()]);
-  if (ad.start_date != null) rows.push(["Started:", formatDate(ad.start_date)]);
+  if (ad.start_date != null) rows.push(["Started:", formatDate(ad.start_date) + " (Active "+ getDaysFromToday(ad.start_date)+" days)"]);
   if (ad.cta_text) rows.push(["CTA:", ad.cta_text]);
   // 对 ad.link_url. 进行解析,仅仅返回域名就可以了
   if (ad.link_url) {
@@ -156,13 +169,10 @@ function buildInfoPanel(ad: AdInfo): HTMLDivElement {
       // ignore invalid URL errors, do not add domain row
     }
   }
-  // if (ad.link_url) rows.push(["Link:", ad.link_url]);
-  // if (ad.caption) rows.push(["Caption", ad.caption.slice(0, 200) + (ad.caption.length > 200 ? "…" : "")]);
-
+ 
   panel.innerHTML = rows
     .map(([k, v]) => `<span class="adlib-pro-info-key">${k}</span><span class="adlib-pro-info-val">${escapeHtml(v)}</span>`)
     .join("");
-
   return panel;
 }
 
@@ -171,26 +181,20 @@ function escapeHtml(s: string): string {
 }
 
 /** 更新或插入某个工具栏容器内的信息面板 */
-function updateInfoPanelInToolbar(toolbarOuter: HTMLElement): void {
+function updateInfoPanelInToolbar(toolbarOuter: HTMLElement,ad:AdInfo|null): void {
   const adId = toolbarOuter.getAttribute("data-ad-id");
   if (!adId) return;
-  const ad = adInfoStore.get(adId);
   let panel = toolbarOuter.querySelector<HTMLDivElement>(`.${AD_INFO_PANEL_CLASS}`);
   if (!ad) return; // 数据还没到，等下次刷新
   if (!panel) {
+    // 这个是panel还没有的时候
     panel = buildInfoPanel(ad);
     toolbarOuter.appendChild(panel);
   } else {
+    //有panel的时候，则替换
     const fresh = buildInfoPanel(ad);
     panel.replaceWith(fresh);
   }
-}
-
-/** 刷新页面所有已渲染工具栏的信息面板 */
-function refreshAllInfoPanels(): void {
-  document.querySelectorAll<HTMLElement>(
-    `.${TOOLBAR_ABOVE_HR_CLASS}[data-ad-id], .${TOOLBAR_WRAP_CLASS}[data-ad-id]`
-  ).forEach(updateInfoPanelInToolbar);
 }
 
 const ADS_LIBRARY_PATH = "/ads/library";
@@ -241,13 +245,6 @@ function injectStyles(): void {
       max-width: 1600px !important;
     }
 
-    .${TOOLBAR_WRAP_CLASS} {
-      width: 100%;
-      box-sizing: border-box;
-      margin: 6px 0 10px;
-    }
-
-    /* 与目标 hr 共用一套 FB utility class，仅用少量覆盖保证里面是横向按钮区而非分割线 */
     .${TOOLBAR_ABOVE_HR_CLASS} {
       display: flex !important;
       flex-direction: column;
@@ -385,18 +382,13 @@ function findAdDetailUrl(context: HTMLElement): string | null {
 
   const adsinfo = adInfoStore.get(adlibarayId)
   // 关键：广告信息不存在时直接返回 null（避免后续报错）
-  if (!adsinfo) {
-    return null;
-  }
-  const currentUrl = getFullUrl();
-
-  // 2. 解析参数（TS 自动推导类型：Record<string, string>）
-  // const params = parseUrlParams();
+  if (!adsinfo) return null;
 
   // 3. 生成新 URL（不跳转）
   const newUrl = createUrlWithNewParams({
     view_all_page_id: adsinfo?.page_id ?? '',
-    q:adsinfo?.page_name??''
+    country:"ALL",
+    search_type:"page"
   });
   return newUrl;  
 }
@@ -510,6 +502,7 @@ function createInlineButton(label: string,actionKey: string, anchorDiv: HTMLElem
   });
   return button;
 }
+
 // 实现key对应的事件
 function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
 
@@ -591,9 +584,6 @@ function findDividerHrElements(): HTMLHRElement[] {
   const exact = Array.from(
     document.querySelectorAll<HTMLHRElement>(AD_DIVIDER_HR_SELECTOR_EXACT)
   );
-  if (exact.length > 0) {
-    return exact;
-  }
   return exact;
 }
 
@@ -640,18 +630,24 @@ function findAdLibraryId(hr:HTMLElement,element:HTMLElement,q:string): void {
         const parts = textContent.split(":");
         if (parts.length >= 2) {
           const adId = parts[1]?.trim(); // 直接返回冒号后的部分
+          const parent = hr.parentElement??null;
+          if(parent){
+            // document.querySelector<HTMLElement>('div[data-ad-id="${adId}"]')
+            const adElement = parent.querySelector<HTMLElement>(`div[data-ad-id="${adId}"]`);
+            // 找到了对应元素,则不进行后续的处理逻辑
+            if (adElement) return;
+          }
           const outer = document.createElement("div");
           outer.className = `${TOOLBAR_ABOVE_HR_CLASS}`;
 
           const context = getAdContextFromHr(hr);
-          // 这里是他父类的元素
-          outer.appendChild(buildActionsWrap(context));
-
+          // 这里是他父类的元素，添加按钮信息
           if (adId) outer.setAttribute("data-ad-id", adId);
-          const parent = hr.parentElement??null;
-          //TODO 
+          outer.appendChild(buildActionsWrap(context));
           if(parent) parent.insertBefore(outer, hr);
-          if(adId) updateInfoPanelInToolbar(outer);
+          //添加描述信息
+          const adinfo:AdInfo|null =  adInfoStore.get(adId)??null;
+          if(adId) updateInfoPanelInToolbar(outer,adinfo);
           return;
         }
       }
@@ -707,7 +703,7 @@ function setupMutationObserver(): void {
       } catch (e) {
         console.log("addInlineActionsForCard 异常", e);
       }
-    }, 800);
+    }, 1000);
   };
 
   const root =
@@ -723,10 +719,6 @@ function setupMutationObserver(): void {
   });
 }
 
-function applyLayoutAdjustments(): void {
-  document.body.classList.add("adlib-pro-layout");
-}
-
 function bootstrap(): void {
 
   if (!isFacebookAdsLibraryPage()) return;
@@ -739,15 +731,10 @@ function bootstrap(): void {
   injectStyles();
 
   // 解析首屏内联 script JSON 数据（首次加载时数据嵌在 HTML 里，不经过 fetch）
-  // parseInlineScriptData();
-  parseAndLogScriptNthChild();
-
-  applyLayoutAdjustments();
-  addInlineActionsForCard();
+  // 然后解析里面的数据，放到缓存中备用，这里解析有两种方法，目前使用的是第二种
+  parseInlineScriptData();
   
   //首屏数据已就绪，立即填充信息面板
-  refreshAllInfoPanels();
-  // backfillMissingAdIds();
   setupMutationObserver();
 
   console.log("bootstrap: 完成初始化。");
