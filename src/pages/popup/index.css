@@ -1,12 +1,255 @@
 body {
-  width: 300px;
-  height: 260px;
+  width: 360px;
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell",
+    "Fira Sans", "Droid Sans", "Helvetica Neue",
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
   position: relative;
+  background: #f3f6fb;
+}
+
+#__root {
+  width: 100%;
+  height: 100%;
+}
+
+.popup-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: #1f2937;
+}
+
+.popup-header {
+  height: 32px;
+  background: linear-gradient(135deg, #1d4ed8 0%, #0ea5e9 100%);
+  color: #eff6ff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.popup-header span{
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.popup-title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.icon-btn {
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.icon-btn-left {
+  font-size: 24px;
+  width: 40px;
+}
+
+.icon-btn-right {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn-right img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.popup-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 12px 8px;
+}
+
+.popup-card {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  box-shadow: 0 6px 14px rgba(14, 30, 62, 0.09);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 14px 12px;
+}
+
+.brand-logo {
+  width: 180px;
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 4px;
+}
+
+.intro-text {
+  margin: 6px 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #334155;
+  text-align: center;
+}
+
+.status-chip {
+  width: 100%;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.status-active {
+  color: #177e3f;
+  background: #ebfaef;
+  border: 1px solid #b9e8c8;
+}
+
+.status-inactive {
+  color: #b42318;
+  background: #fff3f2;
+  border: 1px solid #f5c4c1;
+}
+
+.primary-btn {
+  width: 100%;
+  max-width: 100%;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  cursor: pointer;
+  background: linear-gradient(180deg, #2281ff 0%, #1d68dc 100%);
+  box-shadow: 0 8px 14px rgba(29, 104, 220, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.primary-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 16px rgba(29, 104, 220, 0.28);
+}
+
+.primary-btn-disabled {
+  background: linear-gradient(180deg, #97a8c2 0%, #7f92af 100%);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.primary-btn-disabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.action-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #b42318;
+}
+
+.footer-text {
+  margin-top: 10px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.license-panel {
+  position: absolute;
+  top: 62px;
+  right: 14px;
+  width: 300px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #121825 0%, #0d1320 100%);
+  color: #d8e2f0;
+  border: 1px solid #33415e;
+  padding: 12px 12px 10px;
+  box-shadow: 0 16px 34px rgba(3, 9, 23, 0.45);
+  z-index: 10;
+}
+
+.license-panel h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #f7db58;
+}
+
+.license-panel p {
+  margin: 4px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.panel-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.panel-btn {
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.panel-btn-copy {
+  color: #11213f;
+  background: linear-gradient(180deg, #f8dc57 0%, #edc53e 100%);
+}
+
+.panel-btn-contact {
+  color: #dce9ff;
+  background: #20314f;
+  border-color: #3a5077;
+}
+
+.license-key {
+  display: inline-block;
+  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  word-break: break-all;
+}
+
+.ok {
+  color: #30d158;
+}
+
+.invalid {
+  color: #ff6b6b;
+}
+
+.hint-text {
+  margin-top: 8px;
+  color: #b7c4d7;
 }

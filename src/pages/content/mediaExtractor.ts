@@ -2,6 +2,12 @@
  * 媒体资源提取和下载模块
  */
 
+interface DownloadResponse {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+}
+
 /**
  * 从广告卡片上下文提取所有图片/视频 URL
  */
@@ -45,12 +51,17 @@ export function extractMediaUrls(context: HTMLElement): { images: string[]; vide
 export function downloadViaBackground(url: string, filename: string): void {
   chrome.runtime.sendMessage(
     { type: "DOWNLOAD_MEDIA", url, filename },
-    (resp) => {
+    (resp: DownloadResponse) => {
       if (chrome.runtime.lastError) {
+        window.alert("Download failed. Please try again later.");
         return;
       }
       if (!resp?.ok) {
-        console.log("下载失败", resp?.error ?? "未知错误");
+        if (resp?.error === "KEY_INVALID") {
+          window.alert(resp?.message ?? "Your key is invalid. Please contact customer support to renew your plan.");
+          return;
+        }
+        console.log("Download failed", resp?.error ?? "Unknown error");
       }
     }
   );

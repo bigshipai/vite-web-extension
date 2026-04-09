@@ -43,12 +43,11 @@ export function injectStyles(): void {
     .${TOOLBAR_ABOVE_HR_CLASS} .${ACTIONS_WRAP_CLASS} {
       width: 100%;
       box-sizing: border-box;
-      padding: 1px 1px 2px 5px;
+      padding: 1px 1px 1px 5px;
     }
 
     .${ACTIONS_WRAP_CLASS} {
       display: flex;
-      justify-content: center;
       align-items: center;
       gap: 2px;
       /* 防止被父容器挤压换行 */
@@ -60,7 +59,6 @@ export function injectStyles(): void {
 
     .${ACTION_BUTTON_CLASS} {
       align-items: center;
-      justify-content: center;
       display: flex;
       appearance: none;
       -webkit-appearance: none;
@@ -103,7 +101,8 @@ export function injectStyles(): void {
 
     .${AD_INFO_PANEL_CLASS} {
       display: grid;
-      grid-template-columns: 1fr 3fr 1fr 5fr;
+      justify-content: center;
+      grid-template-columns: 1fr 2fr 1fr 5fr;
       column-gap: 5px;
       row-gap: 1px;
       width: 100%;

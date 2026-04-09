@@ -17,7 +17,8 @@
     "scripting",
     "activeTab",
     "downloads",
-    "tabs"
+    "tabs",
+    "storage"
   ],
   "background": {
     "service_worker": "src/pages/background/index.ts",

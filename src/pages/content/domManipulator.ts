@@ -10,6 +10,13 @@ export const TOOLBAR_WRAP_CLASS = "adlib-pro-toolbar-sibling";
 export const TOOLBAR_ABOVE_HR_CLASS = "adlib-pro-toolbar-above-hr";
 export const AD_DIVIDER_HR_SELECTOR_EXACT =
   "hr.xjbqb8w.xso031l.x1q0q8m5.xqtp20y.xb9moi8.xe76qn7.x21b0me.x142aazg.xw7yly9.x1ys307a.x1yztbdb.xyqm7xq";
+const LICENSE_INVALID_MESSAGE = "Your key is invalid. Please contact customer support to renew your plan.";
+
+interface RuntimeResponse {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+}
 
 /**
  * 从广告卡片找到广告详情页 URL
@@ -89,9 +96,14 @@ function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
     case "open-page-ads": {
       const url = findAdDetailUrl(anchorDiv);
       if (url) {
-        chrome.runtime.sendMessage({ type: "OPEN_TAB", url });
+        chrome.runtime.sendMessage({ type: "OPEN_TAB", url }, (resp: RuntimeResponse) => {
+          if (chrome.runtime.lastError) return;
+          if (!resp?.ok && resp?.error === "KEY_INVALID") {
+            window.alert(resp?.message ?? LICENSE_INVALID_MESSAGE);
+          }
+        });
       } else {
-        window.alert("未找到广告详情链接，请确认当前广告卡片已完全加载。");
+        window.alert("Ad detail link was not found. Please make sure the ad card is fully loaded.");
       }
       break;
     }
@@ -99,9 +111,14 @@ function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
     case "open-link-ads": {
       const url = openLinkAdsUrl(anchorDiv);
       if (url) {
-        chrome.runtime.sendMessage({ type: "OPEN_TAB", url });
+        chrome.runtime.sendMessage({ type: "OPEN_TAB", url }, (resp: RuntimeResponse) => {
+          if (chrome.runtime.lastError) return;
+          if (!resp?.ok && resp?.error === "KEY_INVALID") {
+            window.alert(resp?.message ?? LICENSE_INVALID_MESSAGE);
+          }
+        });
       } else {
-        window.alert("当前页面未找到任何广告链接，请等待页面加载完成后重试。");
+        window.alert("No ad links were found on this page. Please wait until the page is fully loaded and try again.");
       }
       break;
     }
@@ -109,7 +126,7 @@ function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
     case "download": {
       const { images, videos } = extractMediaUrls(anchorDiv);
       if (images.length === 0 && videos.length === 0) {
-        window.alert("当前广告卡片中未找到可下载的图片或视频，请等待媒体加载完成后重试。");
+        window.alert("No downloadable images or videos were found in this ad card. Please wait for media to load and try again.");
         break;
       }
 
@@ -128,7 +145,7 @@ function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
     }
 
     default:
-      window.alert(`未知动作: ${actionKey}`);
+      window.alert(`Unknown action: ${actionKey}`);
   }
 }
 
