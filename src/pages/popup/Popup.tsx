@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FaUserCircle } from "react-icons/fa";
 import logoNoBg from "@assets/img/logo-no-bg.png";
 
@@ -26,18 +26,6 @@ interface GetProfileResponse {
   message?: string;
 }
 
-interface LoginResponse {
-  ok: boolean;
-  profile?: ActiveProfile;
-  message?: string;
-}
-
-interface LogoutResponse {
-  ok: boolean;
-  profile?: ActiveProfile;
-  message?: string;
-}
-
 const ADS_LIBRARY_URL =
   "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=ALL&is_targeted_country=false&media_type=all&q=shopify&search_type=keyword_unordered&sort_data[mode]=total_impressions&sort_data[direction]=desc#/";
 const LIMIT_MESSAGE = "Your trial limit has been reached. Please upgrade to Pro to continue.";
@@ -48,12 +36,8 @@ export default function Popup() {
   const [statusMessage, setStatusMessage] = useState<string>("Checking account...");
   const [isActionAllowed, setIsActionAllowed] = useState<boolean>(false);
   const [tokenCopied, setTokenCopied] = useState<boolean>(false);
-
-  const [loginModalVisible, setLoginModalVisible] = useState<boolean>(false);
-  const [loginEmail, setLoginEmail] = useState<string>("");
-  const [loginPassword, setLoginPassword] = useState<string>("");
-  const [loginLoading, setLoginLoading] = useState<boolean>(false);
-  const [loginError, setLoginError] = useState<string>("");
+  const supportRef = useRef<HTMLDivElement | null>(null);
+  const [showUpgradePlan, setShowUpgradePlan] = useState<boolean>(false);
 
   const totalOps = useMemo(() => {
     if (!profile) return 0;
@@ -61,8 +45,9 @@ export default function Popup() {
   }, [profile]);
 
   const trialMaxOps = profile?.trialMaxOps ?? 10;
+  const isTrialMember = profile?.membership !== "Pro";
 
-  const membershipLabel = profile?.membership === "Pro" ? "Pro (Unlimited)" : "Free Trial (100 actions limit)";
+  const membershipLabel = profile?.membership === "Pro" ? "Pro (Unlimited)" : "Free (10 actions limit)";
   const progressPct = Math.min(100, Math.max(0, Math.round((totalOps / trialMaxOps) * 100)));
 
   const recomputeAllowed = (nextProfile: ActiveProfile): boolean => {
@@ -115,64 +100,7 @@ export default function Popup() {
   };
 
   const contactSupport = (): void => {
-    window.alert("Please contact customer support to renew your plan.");
-  };
-
-  const submitLogin = (): void => {
-    if (loginLoading) return;
-    const email = loginEmail.trim();
-    const password = loginPassword;
-
-    if (!email || password.length < 4) {
-      setLoginError("Please enter a valid email and password.");
-      return;
-    }
-
-    setLoginLoading(true);
-    setLoginError("");
-
-    chrome.runtime.sendMessage({ type: "LOGIN", email, password }, (resp: LoginResponse) => {
-      setLoginLoading(false);
-
-      if (chrome.runtime.lastError) {
-        setLoginError("Login failed. Please try again.");
-        return;
-      }
-
-      if (!resp?.ok || !resp.profile) {
-        setLoginError(resp?.message ?? "Login failed. Please try again.");
-        return;
-      }
-
-      setProfile(resp.profile);
-      const allowed = recomputeAllowed(resp.profile);
-      setIsActionAllowed(allowed);
-      setStatusMessage(allowed ? "All features are available." : LIMIT_MESSAGE);
-      setLoginModalVisible(false);
-      setLoginPassword("");
-      setLoginError("");
-    });
-  };
-
-  const logoutToGuest = (): void => {
-    chrome.runtime.sendMessage({ type: "LOGOUT" }, (resp: LogoutResponse) => {
-      if (chrome.runtime.lastError) {
-        setStatusMessage("Logout failed. Please try again.");
-        return;
-      }
-      if (!resp?.ok || !resp.profile) {
-        setStatusMessage(resp?.message ?? "Logout failed. Please try again.");
-        return;
-      }
-
-      setProfile(resp.profile);
-      const allowed = recomputeAllowed(resp.profile);
-      setIsActionAllowed(allowed);
-      setStatusMessage(allowed ? "All features are available." : LIMIT_MESSAGE);
-      setLoginEmail("");
-      setLoginPassword("");
-      setLoginError("");
-    });
+    supportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
@@ -180,7 +108,6 @@ export default function Popup() {
       <header className="popup-header">
         <h1 className="popup-title">AdLib Pro</h1>
         <span>FB ADS Downloader</span>
-        {/* 使用 react-icons 作为统一的菜单按钮样式，这里用 FaUserCircle 作为“用户中心”入口图标 */}
         <button
           className="icon-btn icon-btn-right"
           type="button"
@@ -199,14 +126,9 @@ export default function Popup() {
               Back
             </button>
             <div className="membership-title">Membership Benefits</div>
-            <div className="topbar-actions">
-              <button className="ghost-btn" type="button" onClick={refreshProfile}>
-                Refresh
-              </button>
-              <button className="ghost-btn ghost-btn-danger" type="button" onClick={logoutToGuest}>
-                Logout
-              </button>
-            </div>
+            <button className="ghost-btn" type="button" onClick={refreshProfile}>
+              Refresh
+            </button>
           </div>
 
           <div className="token-row">
@@ -214,14 +136,13 @@ export default function Popup() {
             <div className="token-value" title={profile?.token ?? ""}>
               {profile?.token ?? "-"}
             </div>
-            <button className="token-btn" type="button" onClick={() => setLoginModalVisible(true)}>
-              Change
+            <button className="token-btn" type="button" onClick={copyToken}>
+              {tokenCopied ? "Token copied" : "Copy token"}
             </button>
           </div>
 
           <div className="usage-card">
-            <div className="usage-title">My Membership & Usage</div>
-            <div className="usage-grid">
+            <div className="usage-top">
               <div className="usage-item">
                 <div className="usage-k">Membership</div>
                 <div className="usage-v">{membershipLabel}</div>
@@ -230,158 +151,36 @@ export default function Popup() {
                 <div className="usage-k">Account</div>
                 <div className="usage-v">{profile?.email ?? "Guest"}</div>
               </div>
-              <div className="usage-item usage-item-ops">
-                <div className="usage-k">Total actions</div>
-                <div className="usage-v">
+            </div>
+
+            <div className="usage-breakdown">
+              <div className="usage-header-row">
+                <div className="usage-title">Usage</div>
+                <div className="usage-total">
                   {totalOps} / {trialMaxOps}
                 </div>
-                {profile?.membership !== "Pro" ? (
-                  <div className="trial-progress-wrap">
-                    <div className="trial-progress-bar" style={{ width: `${progressPct}%` }} />
-                  </div>
-                ) : null}
               </div>
-              <div className="usage-item">
-                <div className="usage-k">Download</div>
-                <div className="usage-v">{profile?.usage.downloadCount ?? 0}</div>
-              </div>
-              <div className="usage-item">
-                <div className="usage-k">Open Page Ads</div>
-                <div className="usage-v">{profile?.usage.openPageAdsCount ?? 0}</div>
-              </div>
-              <div className="usage-item">
-                <div className="usage-k">Open Link Ads</div>
-                <div className="usage-v">{profile?.usage.openLinkAdsCount ?? 0}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="benefits-card">
-            <div className="benefits-head">
-              <div />
-              <div className="col-head">Free</div>
-              <div className="col-head col-head-pro">Pro</div>
-            </div>
-            <div className="benefit-row">
-              <div className="benefit-name">Download images & videos / day</div>
-              <div className="benefit-val">10</div>
-              <div className="benefit-val pro-highlight">Unlimited</div>
-            </div>
-            <div className="benefit-row">
-              <div className="benefit-name">Filter ads by date range</div>
-              <div className="benefit-val">✔</div>
-              <div className="benefit-val">✔</div>
-            </div>
-            <div className="benefit-row">
-              <div className="benefit-name">Ad detail info insights</div>
-              <div className="benefit-val">✔</div>
-              <div className="benefit-val">✔</div>
-            </div>
-            <div className="benefit-row">
-              <div className="benefit-name">One click to open ad detail & all ads</div>
-              <div className="benefit-val">✔</div>
-              <div className="benefit-val">✔</div>
-            </div>
-          </div>
-
-          <div className="promo-banner">
-            <div className="promo-text">Enjoy 30% OFF if you purchase today! (April 2026)</div>
-          </div>
-
-          <div className="pricing-grid">
-            <div className="price-card">
-              <div className="price-title">Monthly</div>
-              <div className="price-main">
-                <span className="price-num">$9.99</span>
-                <span className="price-unit">/mo</span>
-              </div>
-              <button className="price-btn" type="button" onClick={contactSupport}>
-                Try it now
-              </button>
-            </div>
-            <div className="price-card">
-              <div className="price-title">Quarterly</div>
-              <div className="price-main">
-                <span className="price-num">$5.99</span>
-                <span className="price-unit">/mo</span>
-              </div>
-              <button className="price-btn" type="button" onClick={contactSupport}>
-                Try it now
-              </button>
-            </div>
-            <div className="price-card price-card-popular">
-              <div className="popular-badge">Most Popular</div>
-              <div className="price-title">Annual</div>
-              <div className="price-main">
-                <span className="price-num">$4.99</span>
-                <span className="price-unit">/mo</span>
-              </div>
-              <button className="price-btn" type="button" onClick={contactSupport}>
-                Try it now
-              </button>
-            </div>
-          </div>
-
-          <div className="membership-footnote">
-            <button className="copy-token-link" type="button" onClick={copyToken}>
-              {tokenCopied ? "Token copied" : "Copy token"}
-            </button>
-            <span className="dot">•</span>
-            <span className="small-muted">{statusMessage}</span>
-          </div>
-
-          {loginModalVisible ? (
-            <div className="login-overlay" role="dialog" aria-label="login dialog">
-              <div className="login-modal">
-                <div className="login-title">Login / Bind Account</div>
-                <div className="login-subtitle">Enter your email and password to continue.</div>
-
-                <label className="login-field">
-                  <div className="login-label">Email</div>
-                  <input
-                    className="login-input"
-                    type="email"
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    placeholder="you@example.com"
-                  />
-                </label>
-
-                <label className="login-field">
-                  <div className="login-label">Password</div>
-                  <input
-                    className="login-input"
-                    type="password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    placeholder="••••••••"
-                  />
-                </label>
-
-                {loginError ? <div className="login-error">{loginError}</div> : null}
-
-                <div className="login-actions">
-                  <button
-                    className="login-btn"
-                    type="button"
-                    onClick={() => setLoginModalVisible(false)}
-                    disabled={loginLoading}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className={`login-btn login-btn-primary ${loginLoading ? "login-btn-disabled" : ""}`}
-                    type="button"
-                    onClick={submitLogin}
-                    disabled={loginLoading}
-                  >
-                    {loginLoading ? "Logging in..." : "Continue"}
-                  </button>
+              {profile?.membership !== "Pro" ? (
+                <div className="trial-progress-wrap">
+                  <div className="trial-progress-bar" style={{ width: `${progressPct}%` }} />
+                </div>
+              ) : null}
+              <div className="usage-grid usage-grid-compact">
+                <div className="usage-item">
+                  <div className="usage-k">Download</div>
+                  <div className="usage-v">{profile?.usage.downloadCount ?? 0}</div>
+                </div>
+                <div className="usage-item">
+                  <div className="usage-k">Open Page Ads</div>
+                  <div className="usage-v">{profile?.usage.openPageAdsCount ?? 0}</div>
+                </div>
+                <div className="usage-item">
+                  <div className="usage-k">Open Link Ads</div>
+                  <div className="usage-v">{profile?.usage.openLinkAdsCount ?? 0}</div>
                 </div>
               </div>
             </div>
-          ) : null}
-          
+          </div>
         </main>
       ) : (
         <main className="popup-main">
@@ -395,6 +194,11 @@ export default function Popup() {
                 ? "Pro - Unlimited actions"
                 : `Free Trial - ${totalOps} / ${trialMaxOps} actions used`}
             </div>
+            {isTrialMember ? (
+              <button className="upgrade-btn" type="button" onClick={() => setShowUpgradePlan(true)}>
+                Upgrade Subscription
+              </button>
+            ) : null}
             <button
               className={`primary-btn ${!isActionAllowed ? "primary-btn-disabled" : ""}`}
               type="button"
@@ -405,6 +209,93 @@ export default function Popup() {
             </button>
             {!isActionAllowed ? <p className="action-hint">{LIMIT_MESSAGE}</p> : null}
           </section>
+          {isTrialMember && showUpgradePlan ? (
+            <div
+              className="plan-overlay"
+              role="dialog"
+              aria-label="upgrade subscription"
+              onClick={() => setShowUpgradePlan(false)}
+            >
+              <div className="plan-modal" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className="plan-close-btn"
+                  type="button"
+                  aria-label="Close upgrade plan"
+                  onClick={() => setShowUpgradePlan(false)}
+                >
+                  ×
+                </button>
+                <div className="plan-card">
+                  <div className="plan-header">
+                    <div className="plan-title">Free vs Pro</div>
+                    <div className="plan-badge">Annual Plan</div>
+                  </div>
+                  <div className="benefits-head">
+                    <div />
+                    <div className="col-head">Free</div>
+                    <div className="col-head col-head-pro">Pro</div>
+                  </div>
+                  <div className="benefit-row">
+                    <div className="benefit-name">Total actions available</div>
+                    <div className="benefit-val">10 total</div>
+                    <div className="benefit-val pro-highlight">Unlimited</div>
+                  </div>
+                  <div className="plan-divider" />
+                  <div className="plan-offer-text">Yearly subscription: was $9.9/year, now only $6.99/year.</div>
+                  <div className="price-main">
+                    <span className="price-old">$9.9/year</span>
+                    <span className="price-num">Now $6.99/year</span>
+                  </div>
+                  <button
+                    className="price-btn"
+                    type="button"
+                    onClick={() => {
+                      setShowUpgradePlan(false);
+                      contactSupport();
+                    }}
+                  >
+                    Contact to Subscribe
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="support-card" ref={supportRef}>
+            <div className="support-title">Contact Support</div>
+            {/* <div className="support-subtitle">Choose any channel below to contact customer service.</div> */}
+            <div className="support-grid">
+              <div className="support-item">
+                <img className="support-qr" src="/telegram_yexl1123.jpg" alt="Telegram QR code" />
+                <div className="support-label">Telegram</div>
+                <a
+                  className="support-link"
+                  href="https://t.me/yexl1123"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  t.me/yexl1123
+                </a>
+              </div>
+              <div className="support-item">
+                <img className="support-qr" src="/whatapp.jpg" alt="WhatsApp QR code" />
+                <div className="support-label">WhatsApp</div>
+                <a
+                  className="support-link"
+                  href="https://wa.me/qr/ZZR2EB3MS7VJM1"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open WhatsApp
+                </a>
+              </div>
+              <div className="support-item">
+                <img className="support-qr" src="/wechat.jpg" alt="WeChat QR code" />
+                <div className="support-label">WeChat</div>
+                <div className="support-id">wx-dpl-ncfs</div>
+              </div>
+            </div>
+          </div>
           <p className="footer-text">© 2026 GrowthUp (V1.0.0)</p>
         </main>
       )}
