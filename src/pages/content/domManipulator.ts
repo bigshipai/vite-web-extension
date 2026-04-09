@@ -11,6 +11,7 @@ export const TOOLBAR_ABOVE_HR_CLASS = "adlib-pro-toolbar-above-hr";
 export const AD_DIVIDER_HR_SELECTOR_EXACT =
   "hr.xjbqb8w.xso031l.x1q0q8m5.xqtp20y.xb9moi8.xe76qn7.x21b0me.x142aazg.xw7yly9.x1ys307a.x1yztbdb.xyqm7xq";
 const LICENSE_INVALID_MESSAGE = "Your key is invalid. Please contact customer support to renew your plan.";
+const LIMIT_REACHED_MESSAGE = "You have exceeded the trial limit. Please contact customer support to renew your plan.";
 
 interface RuntimeResponse {
   ok?: boolean;
@@ -101,6 +102,9 @@ function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
           if (!resp?.ok && resp?.error === "KEY_INVALID") {
             window.alert(resp?.message ?? LICENSE_INVALID_MESSAGE);
           }
+          if (!resp?.ok && resp?.error === "LIMIT_REACHED") {
+            window.alert(resp?.message ?? LIMIT_REACHED_MESSAGE);
+          }
         });
       } else {
         window.alert("Ad detail link was not found. Please make sure the ad card is fully loaded.");
@@ -114,6 +118,9 @@ function handleToolbarAction(actionKey: string, anchorDiv: HTMLElement): void {
         chrome.runtime.sendMessage({ type: "OPEN_TAB", url }, (resp: RuntimeResponse) => {
           if (chrome.runtime.lastError) return;
           if (!resp?.ok && resp?.error === "KEY_INVALID") {
+            window.alert(resp?.message ?? LICENSE_INVALID_MESSAGE);
+          }
+          if (!resp?.ok && resp?.error === "LIMIT_REACHED") {
             window.alert(resp?.message ?? LICENSE_INVALID_MESSAGE);
           }
         });

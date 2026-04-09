@@ -146,7 +146,7 @@ function createFreeTrialProfile(email?: string): ActiveProfile {
     usage: emptyUsage(),
     createdAt: now,
     expiresAt: now + DAY_MS * 365,
-    trialMaxOps: 100,
+    trialMaxOps: 10,
   };
 }
 
@@ -159,7 +159,7 @@ function createProProfile(email?: string): ActiveProfile {
     usage: emptyUsage(),
     createdAt: now,
     expiresAt: now + DAY_MS * 3650,
-    trialMaxOps: 100,
+    trialMaxOps: 10,
   };
 }
 

@@ -61,6 +61,10 @@ export function downloadViaBackground(url: string, filename: string): void {
           window.alert(resp?.message ?? "Your key is invalid. Please contact customer support to renew your plan.");
           return;
         }
+        if (resp?.error === "LIMIT_REACHED") {
+          window.alert(resp?.message ?? "You have exceeded the trial limit. Please contact customer support to renew your plan.");
+          return;
+        }
         console.log("Download failed", resp?.error ?? "Unknown error");
       }
     }

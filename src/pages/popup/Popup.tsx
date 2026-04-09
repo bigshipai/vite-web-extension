@@ -381,13 +381,14 @@ export default function Popup() {
               </div>
             </div>
           ) : null}
+          
         </main>
       ) : (
         <main className="popup-main">
           <section className="popup-card">
             <img className="brand-logo" src={logoNoBg} alt="AdLib Pro logo" />
             <p className="intro-text">
-              Please open <strong>Facebook Ad Library</strong> in a new tab and log in to Facebook to continue.
+              Please open <strong>Facebook Ad Library</strong> in a new tab to continue.
             </p>
             <div className={`status-chip ${isActionAllowed ? "status-active" : "status-inactive"}`}>
               {profile?.membership === "Pro"
