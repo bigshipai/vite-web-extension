@@ -48,9 +48,14 @@ export function injectStyles(): void {
 
     .${ACTIONS_WRAP_CLASS} {
       display: flex;
+      justify-content: center;
       align-items: center;
       gap: 2px;
-      flex-wrap: wrap;
+      /* 防止被父容器挤压换行 */
+      flex-wrap: nowrap !important;
+      /* 防止容器被压缩 */
+      white-space: nowrap;
+      width: 100%;
     }
 
     .${ACTION_BUTTON_CLASS} {
@@ -69,10 +74,13 @@ export function injectStyles(): void {
       font-size: 12px;
       font-weight: 600;
       line-height: 1.3333;
-      padding: 5px 20px;
+      padding: 5px 10px;
       cursor: pointer;
       box-shadow: none;
       transition: background-color 0.1s ease, border-color 0.1s ease;
+      /* 按钮不缩小、不换行 */
+      flex-shrink: 0;
+      white-space: nowrap;
     }
 
     .${ACTION_BUTTON_CLASS}:hover {

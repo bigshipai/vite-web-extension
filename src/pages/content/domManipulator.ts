@@ -36,7 +36,8 @@ export function openLinkAdsUrl(context: HTMLElement): string | null {
   if (!adsinfo) return null;
 
   const newUrl = createUrlWithNewParams({
-    q: getHostname(adsinfo?.link_url)
+    q: getHostname(adsinfo?.link_url),
+    view_all_page_id:""
   });
   return newUrl;
 }
